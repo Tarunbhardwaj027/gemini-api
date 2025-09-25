@@ -1,0 +1,278 @@
+🧱 Project Structure
+Code
+src/
+├── App.tsx
+├── index.tsx
+├── context/
+│   └── ChatContext.tsx
+├── components/
+│   ├── ChatWindow.tsx
+│   ├── ChatInput.tsx
+│   └── MessageBubble.tsx
+├── utils/
+│   └── geminiApi.ts
+├── styles/
+│   └── Chat.module.css
+├── types/
+│   └── Message.ts
+.env.local
+🧠 1. Type Definitions
+types/Message.ts
+
+ts
+export type Message = {
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: string;
+};
+🌍 2. Environment Setup
+.env.local
+
+Code
+REACT_APP_GEMINI_API_KEY=your_key_here
+🧠 3. Chat Context
+context/ChatContext.tsx
+
+tsx
+import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import { Message } from '../types/Message';
+
+type ChatContextType = {
+  messages: Message[];
+  addMessage: (msg: Message) => void;
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+};
+
+export const ChatContext = createContext<ChatContextType>({
+  messages: [],
+  addMessage: () => {},
+  setMessages: () => {},
+});
+
+export const ChatProvider = ({ children }: { children: ReactNode }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('chatHistory');
+    if (stored) setMessages(JSON.parse(stored));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('chatHistory', JSON.stringify(messages));
+  }, [messages]);
+
+  const addMessage = (msg: Message) => {
+    setMessages(prev => [...prev, msg]);
+  };
+
+  return (
+    <ChatContext.Provider value={{ messages, addMessage, setMessages }}>
+      {children}
+    </ChatContext.Provider>
+  );
+};
+🧠 4. Gemini API Utility
+utils/geminiApi.ts
+
+ts
+import { Message } from '../types/Message';
+
+export const sendToGemini = async (messages: Message[]): Promise<string> => {
+  const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+
+  const payload = {
+    model: 'gemini-1.5-flash',
+    messages: messages.map(m => ({ role: m.role, content: m.text })),
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) throw new Error('Gemini API error');
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || 'No response';
+};
+💬 5. MessageBubble Component
+components/MessageBubble.tsx
+
+tsx
+import React from 'react';
+import { Message } from '../types/Message';
+import styles from '../styles/Chat.module.css';
+
+const MessageBubble: React.FC<{ message: Message }> = ({ message }) => (
+  <div className={message.role === 'user' ? styles.user : styles.assistant}>
+    <p>{message.text}</p>
+    <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
+  </div>
+);
+
+export default MessageBubble;
+🪟 6. ChatWindow Component
+components/ChatWindow.tsx
+
+tsx
+import React, { useContext, useEffect, useRef } from 'react';
+import { ChatContext } from '../context/ChatContext';
+import MessageBubble from './MessageBubble';
+import styles from '../styles/Chat.module.css';
+
+const ChatWindow: React.FC = () => {
+  const { messages } = useContext(ChatContext);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  return (
+    <div className={styles.chatWindow}>
+      {messages.map((msg, i) => (
+        <MessageBubble key={i} message={msg} />
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  );
+};
+
+export default ChatWindow;
+🧠 7. ChatInput Component
+components/ChatInput.tsx
+
+tsx
+import React, { useState, useContext } from 'react';
+import { ChatContext } from '../context/ChatContext';
+import { sendToGemini } from '../utils/geminiApi';
+import { Message } from '../types/Message';
+import styles from '../styles/Chat.module.css';
+
+const ChatInput: React.FC = () => {
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { messages, addMessage } = useContext(ChatContext);
+
+  const handleSubmit = async () => {
+    if (!input.trim()) return;
+    const userMsg: Message = {
+      role: 'user',
+      text: input,
+      timestamp: new Date().toISOString(),
+    };
+    addMessage(userMsg);
+    setInput('');
+    setLoading(true);
+
+    try {
+      const reply = await sendToGemini([...messages, userMsg]);
+      const aiMsg: Message = {
+        role: 'assistant',
+        text: reply,
+        timestamp: new Date().toISOString(),
+      };
+      addMessage(aiMsg);
+    } catch (err) {
+      addMessage({
+        role: 'assistant',
+        text: 'Error fetching response. Please try again.',
+        timestamp: new Date().toISOString(),
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className={styles.inputBar}>
+      <input
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        disabled={loading}
+        aria-label="Chat input"
+        onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+      />
+      <button onClick={handleSubmit} disabled={loading}>
+        {loading ? '...' : 'Send'}
+      </button>
+    </div>
+  );
+};
+
+export default ChatInput;
+🧠 8. App Entry
+App.tsx
+
+tsx
+import React from 'react';
+import { ChatProvider } from './context/ChatContext';
+import ChatWindow from './components/ChatWindow';
+import ChatInput from './components/ChatInput';
+import styles from './styles/Chat.module.css';
+
+const App: React.FC = () => (
+  <ChatProvider>
+    <div className={styles.container}>
+      <ChatWindow />
+      <ChatInput />
+    </div>
+  </ChatProvider>
+);
+
+export default App;
+🎨 9. Styling (CSS Modules)
+styles/Chat.module.css
+
+css
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 600px;
+  margin: auto;
+  border: 1px solid #ccc;
+}
+
+.chatWindow {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  background: #f9f9f9;
+}
+
+.inputBar {
+  display: flex;
+  padding: 1rem;
+  border-top: 1px solid #ccc;
+}
+
+.inputBar input {
+  flex: 1;
+  padding: 0.5rem;
+}
+
+.inputBar button {
+  margin-left: 0.5rem;
+  padding: 0.5rem 1rem;
+}
+
+.user {
+  text-align: right;
+  background: #d1e7dd;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  border-radius: 8px;
+}
+
+.assistant {
+  text-align: left;
+  background: #e2e3e5;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  border-radius: 8px;
+}
